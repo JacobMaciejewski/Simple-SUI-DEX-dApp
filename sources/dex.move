@@ -81,10 +81,38 @@ module dex::dex{
         return 0;
     }
 
+    fun transfer_coin<CoinType>(coin : sui::coin::Coin<CoinType>, sender : address) {
+        if(sui::coin::value(coin)){
+            sui::coin::destroy_zero(coin);
+        }else{
+            sui::transfer::public_transfer(c, sender);
+        };
+    }
+
+    // passes the task of placing a market order to the internal function
+    // assigns the ownership of the returns assets to the sender
+    public fun place_market_order(dex_info : &mut DexInfo,
+                                  pool : &mut deepbook::clob_v2::Pool<ETH, USDC>,
+                                  account_cap : &deepbook::custodian_v2::AccountCap,
+                                  quantity : u64,
+                                  is_bid : bool,
+                                  base_coin : sui::coin::Coin<ETH>,
+                                  quote_coin : sui::coin::Coin<USDC>,
+                                  c : &sui::clock::Clock,
+                                  ctx : &mut TxContext){
+                                
+        (eth_coin, usdc_coin, dex_coin) = place_market_order_internal(dex_info, pool, account_cap, quantity, is_bid, base_coin, quote_coin, c, ctx);
+
+        let sender : address = sui::tx_context::sender(ctx);
+        transfer_coin(eth_coin, sender);
+        transfer_coin(usdc_coin, sender);
+        transfer_coin(dex_coin, sender);
+    }
+
     // Updates the swapping count for the sender of the request based on his previous interactions
     // Every two swaps by the same user, the dex coin supply is changed for some reason
     // The swap request between the ETH and USDC coins is being passed into the native market order function of clob
-    public fun place_market_order(dex_info : &mut DexInfo,
+    public fun place_market_order_internal(dex_info : &mut DexInfo,
                                   pool : &mut deepbook::clob_v2::Pool<ETH, USDC>,
                                   account_cap : &deepbook::custodian_v2::AccountCap,
                                   quantity : u64,
@@ -133,8 +161,62 @@ module dex::dex{
         return (eth_coin, usdc_coin, dex_coin);
     }
 
+    // we create a pool where teh values are scaled by float scaling (multiply with 1 billion to get int representation)
+    // Ticker size (the minimum price change) = 1 USDC - 1e9  
+    // Lot size - 1 
+    // Fees paid through - SUI coin 
+    public fun create_pool(fee : sui::coin::Coin<SUI>, ctx : &mut TxContext){
+        return clob::create_pool<ETH, USDC>(1 * FLOAT_SCALING, 1, fee, ctx);
+    } 
+    
+    // creates ask and bids orders in the pool so people can trade
+    // called only when there are no orders in the pool
+    public fun populate_pool(dex_info : &DexInfo,
+                        pool : clob::Pool<ETH, USDC>,
+                        c : &sui::clock::Clock,
+                        ctx : &mut TxContext){
+        create_ask_orders(dex_info, pool, c, ctx);
+        create_bid_orders(dex_info, pool, c, ctx);
+    }
 
 
+
+    
+    // add the token information struct to the dex struct per token type (ETH/USDC) as dynamic field
+    public fun setup_token_information_for_dex(dex_info : &mut DexInfo,
+                                               eth_cap : sui::coin::TreasuryCap,
+                                               usdc_cap : sui::coin::TreasuryCap,
+                                               ctx : &mut TxContext){
+
+        // the token information struct is being added to the dex structure, being pointed to with a new identifier produced by sui's typename
+        sui::dynamic_field::add(&mut dex_info, sui::type_name::get<ETH>(), TokenInfo{cap : eth_cap, faucet_lock : sui::table::new(ctx)});
+        sui::dynamic_field::add(&mut dex_info, sui::type_name::get<USDC>(), TokenInfo{cap : usdc_cap, faucet_lock : sui::table::new(ctx)});
+    }
+
+    // checks if the token type hasn't been minted by the user within the current epoch 
+    // minting epoch is set as the current one and the token is minted
+    public fun mint_token<CoinType>(dex_info : mut& DexInfo
+
+    ) : sui::Coin<CoinType>{
+
+        let sender : address = sui::object::sender(ctx);
+        let current_epoch : u64 = sui::tx_context::epoch(ctx);
+        let token_info : &mut TokenInfo<CoinType> = sui::dynamic_field::borrow_mut<TypeName, TokenInfo<CoinType>>(&mut dex_info, sui::type_name::get<CoinType>());
+
+        if(sui::table::contains(&token_info.faucet_lock, sender)){ // in the case the sender has already minted the token
+            let previous_mint_epoch : u64 = *sui::table::borrow(&token_info.faucet_lock, sender);
+            assert!(current_epoch > previous_mint_epoch, EAlreadyMintedThisEpoch); //make sure it happened in a previous epoch
+        }
+        else{
+            sui::table::add(&mut token_info.faucet_lock, sender, 0); // initialize memory for sender's token mint epoch (couldn't we just update it with current epoch?)
+        }
+    
+        // update the mint epoch with current one 
+        let mint_epoch : &u64 = table::borrow_mut(&mut token_info.faucet_lock, sender); 
+        *mint_epoch = sui::tx_context::epoch(ctx);
+        // mint the token
+        sui::coin::mint(&mut token_info.cap, if (sui::type_name::get<CoinType>() == get<USDC>()) 100 * FLOAT_SCALING else 1 * FLOAT_SCALING, ctx)
+    }
 }
 
 //     public fun place_market_order(
