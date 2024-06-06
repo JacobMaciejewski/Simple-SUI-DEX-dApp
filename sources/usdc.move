@@ -2,7 +2,6 @@ module dex::usdc{
     // USDC token 
     struct USDC has drop {};
 
-
     fun init(witness : USDC, ctx : &mut TxContext){
         let (treasury_cap, token_metadata) = sui::coin::create_currency<USDC>(
             witness, // one witness struct used to verify no other token like this exists on-chain

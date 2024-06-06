@@ -1,8 +1,7 @@
 module dex::eth {
-
   // Creating a dummy empty object for the ETH object data type
   // It will be used to verify the singular instance of this type with the one witness check  
-  struct ETH has drop {}
+  struct ETH has drop {};
 
   fun init(witness: ETH, ctx: &mut TxContext) {
 
@@ -19,5 +18,10 @@ module dex::eth {
 
       transfer::public_transfer(treasury_cap, sui::tx_context::sender(ctx)); // The ownership of the Treasury Cap which contains the max supply of the token is given to the caller
       transfer::public_share_object(metadata); // Metadata are shared to everyone on the global storage
+  }
+
+  #[test_only]
+  public fun test_token_initialization(ctx: &mut TxContext) {
+      init(ETH {}, ctx);
   }
 }
