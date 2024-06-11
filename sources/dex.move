@@ -64,7 +64,7 @@ module dex::dex{
         // then we extract the name of the type of the token
         // token_info struct is a dynamic field in the dex information struct, as it is not included in the initial definition
 
-        let token_info : TokenInfo<CoinType> = sui::dynamic_field::borrow<sui::type_name::TypeName, TokenInfo<CoinType>>(&dex_info.id, sui::type_name::get<CoinType>());
+        let token_info : &TokenInfo<CoinType> = sui::dynamic_field::borrow<sui::type_name::TypeName, TokenInfo<CoinType>>(&dex_info.id, sui::type_name::get<CoinType>());
         
         // we check if an entry about user's last mint epoch is contained within the faucet lock table of the information structure about the token at hand 
         if(sui::table::contains(&token_info.faucet_lock, user)){
@@ -171,16 +171,13 @@ module dex::dex{
     
     // creates ask and bids orders in the pool so people can trade
     // called only when there are no orders in the pool
-    public fun populate_pool(dex_info : &DexInfo,
-                        pool : clob::Pool<ETH, USDC>,
+    public fun populate_pool(dex_info : &mut DexInfo,
+                        pool : &mut clob::Pool<ETH, USDC>,
                         c : &sui::clock::Clock,
                         ctx : &mut TxContext){
         create_ask_orders(dex_info, pool, c, ctx);
         create_bid_orders(dex_info, pool, c, ctx);
     }
-
-
-
     
     // add the token information struct to the dex struct per token type (ETH/USDC) as dynamic field
     public fun setup_token_information_for_dex(dex_info : &mut DexInfo,
@@ -195,13 +192,11 @@ module dex::dex{
 
     // checks if the token type hasn't been minted by the user within the current epoch 
     // minting epoch is set as the current one and the token is minted
-    public fun mint_token<CoinType>(dex_info : mut& DexInfo
-
-    ) : sui::Coin<CoinType>{
+    public fun mint_token<CoinType>(dex_info : mut& DexInfo) : sui::Coin<CoinType>{
 
         let sender : address = sui::object::sender(ctx);
         let current_epoch : u64 = sui::tx_context::epoch(ctx);
-        let token_info : &mut TokenInfo<CoinType> = sui::dynamic_field::borrow_mut<TypeName, TokenInfo<CoinType>>(&mut dex_info, sui::type_name::get<CoinType>());
+        let token_info : &mut TokenInfo<CoinType> = sui::dynamic_field::borrow_mut<sui::type_name::TypeName, TokenInfo<CoinType>>(&mut dex_info, sui::type_name::get<CoinType>());
 
         if(sui::table::contains(&token_info.faucet_lock, sender)){ // in the case the sender has already minted the token
             let previous_mint_epoch : u64 = *sui::table::borrow(&token_info.faucet_lock, sender);
@@ -215,8 +210,76 @@ module dex::dex{
         let mint_epoch : &u64 = table::borrow_mut(&mut token_info.faucet_lock, sender); 
         *mint_epoch = sui::tx_context::epoch(ctx);
         // mint the token
-        sui::coin::mint(&mut token_info.cap, if (sui::type_name::get<CoinType>() == get<USDC>()) 100 * FLOAT_SCALING else 1 * FLOAT_SCALING, ctx)
+        sui::coin::mint(&mut token_info.cap, if (sui::type_name::get<CoinType>() == sui::type_name::get<USDC>()) 100 * FLOAT_SCALING else 1 * FLOAT_SCALING, ctx)
     }
+
+    public fun populate_pool(dex_info : &mut DexInfo,
+                        pool : &mut clob::Pool<ETH, USDC>,
+                        c : &sui::clock::Clock,
+                        ctx : &mut TxContext){
+        create_ask_orders(dex_info, pool, c, ctx);
+        create_bid_orders(dex_info, pool, c, ctx);
+    }
+
+    fun create_ask_orders(dex_info : &mut DexInfo,
+                          pool : &mut clob::Pool<ETH, USDC>,
+                          c : &sui::clock::Clock,
+                          ctx : &mut TxContext){
+
+        let eth_info : &TokenInfo<ETH> = sui::dynamic_field::borrow<sui::type_name::TypeName, TokenInfo<ETH>>(&mut dex_info.id, sui::type_name::get<ETH>());
+        // not sure how this deposit function works
+        clob::deposit_base<ETH, USDC>(pool, coin::mint(&mut eth_info.cap, 60000000000000, ctx), &dex_info.account_cap);
+
+        clob::place_limit_order(
+            pool,
+            dex_info.client_id,
+            120 * FLOAT_SCALING, 
+            60000000000000,
+            NO_RESTRICTION,
+            false,
+            MAX_U64,
+            NO_RESTRICTION,
+            c,
+            &dex_info.account_cap,
+            ctx
+        );
+
+        dex_info.client_id = dex_info.client_id + 1; //order ID increased by one
+    }
+
+
+    fun create_bid_orders(dex_info : &mut DexInfo,
+                          pool : &mut clob::Pool<ETH, USDC>,
+                          c : &sui::clock::Clock,
+                          ctx : &mut TxContext){
+
+        let usdc_info : &TokenInfo<USDC> = sui::dynamic_field::borrow<sui::type_name::TypeName, TokenInfo<USDC>>(&mut dex_info.id, sui::type_name::get<USDC>());
+        // not sure how this deposit function works
+        clob::deposit_quote<ETH, USDC>(pool, coin::mint(&mut usdc_info.cap, 6000000000000000, ctx), &dex_info.account_cap);
+
+        clob::place_limit_order(
+            pool,
+            dex_info.client_id,
+            100 * FLOAT_SCALING, 
+            60000000000000,
+            NO_RESTRICTION,
+            false,
+            MAX_U64,
+            NO_RESTRICTION,
+            c,
+            &dex_info.account_cap,
+            ctx
+        );
+
+        dex_info.client_id = dex_info.client_id + 1; //order ID increased by one 
+    }
+
+
+    #[test_only]
+    public fun initialize_dex(ctx: &mut TxContext) {
+        init( DEX {}, ctx);
+    }
+}
 }
 
 //     public fun place_market_order(
