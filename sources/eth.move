@@ -1,8 +1,9 @@
 module dex::eth {
   // Creating a dummy empty object for the ETH object data type
   // It will be used to verify the singular instance of this type with the one witness check  
-  struct ETH has drop {};
+  public struct ETH has drop {}
 
+  #[allow(lint(share_owned))]
   fun init(witness: ETH, ctx: &mut TxContext) {
 
       // Creating a new token named ETH with its metadata   
